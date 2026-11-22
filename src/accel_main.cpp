@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -22,10 +23,13 @@ constexpr float RADIUS_MULTIPLIER = 5.f;
 constexpr float MIN_RADIUS = 1.f;
 constexpr float AVG_SPEED = 0.3f;
 
-float rand01(PCG& rng) { return static_cast<float>(rng() / PCG::max()); }
+static sf::Vector2f randomPosition(PCG& rng, float radius) {
+    const float span = WORLD_WIDTH - 2.f * radius;
+    return {radius + rng.rand01() * span, radius + rng.rand01() * span};
+}
 
 struct Ball {
-    Ball(float radius = 1, const sf::Vector2f& pos = {}, const sf::Vector2f& vel = {})
+    explicit Ball(float radius = 1, const sf::Vector2f& pos = {}, const sf::Vector2f& vel = {})
         : radius{radius}, position{pos}, velocity{vel} {
         geometry.setRadius(radius);
         geometry.setOrigin({radius, radius});
@@ -34,26 +38,26 @@ struct Ball {
     }
 
     void pushIntoBounds() {
-        const AABB<float> _bounds = bounds();
-        if (_bounds.minPoint.x < 0) {
-            position.x -= _bounds.minPoint.x;
+        const auto [minPoint, maxPoint] = bounds();
+        if (minPoint.x < 0) {
+            position.x = radius;
             velocity.x = -velocity.x;
         }
-        if (_bounds.minPoint.y < 0) {
-            position.y -= _bounds.minPoint.y;
+        if (minPoint.y < 0) {
+            position.y = radius;
             velocity.y = -velocity.y;
         }
-        if (_bounds.maxPoint.x > WORLD_WIDTH) {
-            position.x -= _bounds.maxPoint.x - WORLD_WIDTH;
+        if (maxPoint.x > WORLD_WIDTH) {
+            position.x = WORLD_WIDTH - radius;
             velocity.x = -velocity.x;
         }
-        if (_bounds.maxPoint.y > WORLD_WIDTH) {
-            position.y -= _bounds.maxPoint.y - WORLD_WIDTH;
+        if (maxPoint.y > WORLD_WIDTH) {
+            position.y = WORLD_WIDTH - radius;
             velocity.y = -velocity.y;
         }
     }
 
-    void update(float deltaTime) {
+    void update(const float deltaTime) {
         position += deltaTime * velocity;
         pushIntoBounds();
     }
@@ -125,7 +129,7 @@ int main() {
     (void)window.setActive();  // set window as OpenGL target
     // window.setMouseCursorVisible(false); // hide cursor
 
-    if (!gladLoadGLLoader((GLADloadproc)sf::Context::getFunction)) {
+    if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(sf::Context::getFunction))) {
         // Handle GLAD initialization error
         return -1;
     }
@@ -136,7 +140,7 @@ int main() {
         abort();
     }
 
-    // Query the settings we actually received (may be different):
+    // Query the settings we actually received (maybe different):
     const auto& actualSettings = window.getSettings();
     std::cout << "OpenGL version " << actualSettings.majorVersion << "."
               << actualSettings.minorVersion << " flags: " << actualSettings.attributeFlags << '\n';
@@ -145,63 +149,64 @@ int main() {
     PCG rng;
     std::vector<Ball> balls;
     balls.reserve(NUM_BALLS);
-    QuadTree<Ball> ballsAccel(AABB<float>{.minPoint = sf::Vector2f(0, 0),
-                                          .maxPoint = sf::Vector2f(WORLD_WIDTH, WORLD_WIDTH)});
+    QuadTree<Ball> ballsAccel(
+        AABB{.minPoint = sf::Vector2f(0, 0), .maxPoint = sf::Vector2f(WORLD_WIDTH, WORLD_WIDTH)});
     std::vector<uint32_t> candidates;
     candidates.reserve(NUM_BALLS);
     for (size_t i = 0; i < NUM_BALLS; ++i) {
-        candidates.clear();
-        const float radius = rand01(rng) * RADIUS_MULTIPLIER + MIN_RADIUS;
-        Ball newBall(radius,
-                     sf::Vector2f{rand01(rng) * (WORLD_WIDTH - radius) + radius,
-                                  rand01(rng) * (WORLD_WIDTH - radius) + radius},
-                     sf::Vector2f{rand01(rng), rand01(rng)} * AVG_SPEED * 2.f - AVG_SPEED);
-        // while intersects, fix:
-        while (ballsAccel.queryIntersecting(newBall.bounds(), candidates) > 0) {
+        const float radius = rng.rand01() * RADIUS_MULTIPLIER + MIN_RADIUS;
+        Ball newBall(radius, randomPosition(rng, radius),
+                     sf::Vector2f{rng.rand01(), rng.rand01()} * AVG_SPEED * 2.f - AVG_SPEED);
+        while (true) {
             candidates.clear();
-            newBall.position = sf::Vector2f{rand01(rng) * WORLD_WIDTH, rand01(rng) * WORLD_WIDTH};
+            ballsAccel.queryIntersecting(newBall.bounds(), candidates);
+            if (std::ranges::none_of(
+                    candidates, [&](const uint32_t j) { return newBall.intersects(balls[j]); })) {
+                break;
+            }
+            newBall.position = randomPosition(rng, radius);
         }
         ballsAccel.insert(newBall, newBall.bounds());
         balls.push_back(newBall);
     }
     Timer timer;
     float frameTimeMillisEMA = -1;
-    size_t i = 0;
+    size_t f = 0;
     while (window.isOpen()) {
         while (auto e = window.pollEvent()) {
             if (e->is<sf::Event::Closed>()) {
                 return 0;
             }
         }
-        float dt = timer.click<Timer::Millis>();
+        auto dt = static_cast<float>(timer.click<Timer::Millis>());
         if (frameTimeMillisEMA == -1) [[unlikely]] {
             frameTimeMillisEMA = dt;
         } else {
-            frameTimeMillisEMA += 0.05 * (dt - frameTimeMillisEMA);
+            frameTimeMillisEMA += 0.05f * (dt - frameTimeMillisEMA);
         }
-        if (i % 128 == 1) {
-            std::cout << "FPS: " << 1000.f / frameTimeMillisEMA << '\n';
+        if (f % 128 == 1) {
+            std::cout << "FPS: " << 1000.f / frameTimeMillisEMA << std::endl;
         }
-        for (int i = 0; i < (int)balls.size(); ++i) {
-            balls[i].update(dt);
+        for (auto& ball : balls) {
+            ball.update(dt);
         }
-        QuadTree<Ball> newQuadTree(AABB<float>{.minPoint = sf::Vector2f(0, 0),
-                                               .maxPoint = sf::Vector2f(WORLD_WIDTH, WORLD_WIDTH)});
+        QuadTree<Ball> newQuadTree(AABB{.minPoint = sf::Vector2f(0, 0),
+                                        .maxPoint = sf::Vector2f(WORLD_WIDTH, WORLD_WIDTH)});
 
-        for (int i = 0; i < (int)NUM_BALLS; ++i) {
+        for (int i = 0; i < NUM_BALLS; ++i) {
             auto bounds = balls[i].bounds();
             newQuadTree.insert(balls[i], bounds);
         }
         ballsAccel = std::move(newQuadTree);
 
-        for (int i = 0; i < (int)ballsAccel.containerSize(); ++i) {
+        for (int i = 0; i < ballsAccel.containerSize(); ++i) {
             if (!ballsAccel.valid(i)) {
                 continue;
             }
             candidates.clear();
             if (ballsAccel.queryIntersecting(ballsAccel[i].bounds(), candidates) > 1) {
                 for (auto j : candidates) {
-                    if (j == (uint32_t)i) {
+                    if (j == static_cast<uint32_t>(i)) {
                         continue;
                     }
                     if (balls[i].intersects(balls[j])) {
@@ -217,7 +222,7 @@ int main() {
             balls[i].draw(window, states);
         }
         window.display();
-        ++i;
+        ++f;
     }
     return 0;
 }

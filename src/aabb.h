@@ -30,16 +30,18 @@ struct AABB {
 
     constexpr bool empty() const { return minPoint.x > maxPoint.x || minPoint.y > maxPoint.y; }
 
-    constexpr operator bool() const { return !empty(); }
+    explicit constexpr operator bool() const { return !empty(); }
 
-    constexpr bool intersects(const AABB<T>& other) const { return !((*this) & other).empty(); }
+    constexpr bool intersects(const AABB& other) const { return !((*this) & other).empty(); }
 
     constexpr bool contains(const sf::Vector2<T>& other) const {
         return minPoint.x <= other.x && maxPoint.x >= other.x && minPoint.y <= other.y &&
                maxPoint.y >= other.y;
     }
 
-    constexpr bool contains(const AABB<T>& other) const { return ((*this) & other) == other; }
+    constexpr bool contains(const AABB& other) const {
+        return contains(other.minPoint) && contains(other.maxPoint);
+    }
 
     constexpr sf::Vector2<T> middle() const {
         return minPoint + (maxPoint - minPoint) / static_cast<T>(2);

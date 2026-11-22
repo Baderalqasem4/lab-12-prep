@@ -6,7 +6,7 @@
 #include <limits>   // std::numeric_limits
 #include <random>   // std::uniform_random_bit_generator (for static assertion)
 
-// 32 bit random number generator with excellent statistical properties:
+// 32-bit random number generator with excellent statistical properties:
 class PCG {
 public:
     // Implementing the requirements for the UniformRandomBitGenerator concept:
@@ -15,20 +15,22 @@ public:
     constexpr static result_type min() { return 0; }
     constexpr static result_type max() { return std::numeric_limits<uint32_t>::max(); }
 
-    PCG(uint64_t seed = 0) : mState{0x4d595df4d0f33173ull + seed + increment} {
+    explicit PCG(const uint64_t seed = 0) : mState{0x4d595df4d0f33173ull + seed + increment} {
         this->operator()();
     }
 
     constexpr result_type operator()() {
         uint64_t x = mState;
-        uint32_t count = (uint32_t)(x >> 59);  // 59 = 64 - 5
+        const auto count = static_cast<int>(x >> 59);  // 59 = 64 - 5
 
         mState = x * multiplier + increment;
         x ^= x >> 18;                                  // 18 = (64 - 27)/2
-        return std::rotr((uint32_t)(x >> 27), count);  // 27 = 32 - 5
+        return std::rotr(static_cast<uint32_t>(x >> 27), count);  // 27 = 32 - 5
     }
 
-    void reset(uint64_t seed = 0) {
+    float rand01() { return static_cast<float>((*this)()) / static_cast<float>(max()); }
+
+    void reset(const uint64_t seed = 0) {
         mState = 0x4d595df4d0f33173ull + seed + increment;
         this->operator()();
     }

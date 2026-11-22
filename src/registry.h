@@ -49,7 +49,7 @@ public:
         return const_cast<T&>(const_cast<const Registry<T>*>(this)->operator[](index));
     }
 
-    bool valid(size_t index) const { return index < mValid.size() && mValid[index]; }
+    bool valid(const size_t index) const { return index < mValid.size() && mValid[index]; }
 
     size_t size() const { return mSize; }
 
@@ -65,7 +65,7 @@ private:
     std::vector<T> mStorage;
     std::vector<size_t> mFreeList;
     std::vector<bool> mValid;
-    size_t mSize;
+    size_t mSize = 0;
 };
 
 #endif  // REGISTRY_H
