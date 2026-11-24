@@ -178,8 +178,59 @@ public:
     // Appends primitive indicies whose bounds intersect with the given queryBounds to candidates.
     // Returns the number of intersection candidates found
     uint32_t queryIntersecting(const AABB<float>& queryBounds, std::vector<uint32_t>& candidates) {
-        // TODO -- do not use recursion, but you may emulate it yourself.
-        return 0;
+        
+        uint32_t count = 0;
+
+        // create stack and start at the root 
+        std::vector<std::pair<uint32_t, AABB<float>>> nodeStack;
+        nodeStack.push_back({0, mBounds});
+
+        // traverse tree until the stack is empty
+        while (!nodeStack.empty()) {
+
+            // get and remove top node from stack
+            uint32_t nodeIdx = nodeStack.back().first;
+            AABB<float> cellBounds = nodeStack.back().second;
+            nodeStack.pop_back();
+
+            // skip cells that dont intersect the query
+            if (!cellBounds.intersects(queryBounds))
+                continue;
+
+            const QuadTreeNode& node = mNodes[nodeIdx];
+
+            // check primitives stored in current node
+            uint32_t primitiveIdx = node.primitivesIdx;
+
+            while (primitiveIdx != INVALID_IDX) {
+
+                // add intersecting primitives to candidates
+                if (mPrimitiveBounds[primitiveIdx].intersects(queryBounds)) {
+                    candidates.push_back(primitiveIdx);
+                    count++;
+                }
+
+                // move to the next primitive
+                primitiveIdx = mNextPrimitiveIdx[primitiveIdx];
+            }
+
+            // check the four children if the node is not a leaf
+            if (!node.isLeaf()) {
+                for (uint32_t dir = 0; dir < 4; dir++) {
+                    AABB<float> childBounds = cellBounds;
+
+                    // calculate the bounds of the child
+                    aabbEnter(childBounds, static_cast<OrdinalDirection>(dir));
+
+                    // add intersecting children to the stack
+                    if (childBounds.intersects(queryBounds)) {
+                        nodeStack.push_back({node.childIdx + dir, childBounds});
+                    }
+                }
+            }
+        }
+
+        return count;
     }
 
     // suitable for sparse updates
@@ -290,15 +341,61 @@ private:
     // Precondition: currentCell contains query.
     OrdinalDirection aabbQueryQuadrant(const AABB<float>& query,
                                        const AABB<float>& currentCell) const {
-        return {};
+        // find the center of the current cell
+        sf::Vector2f center = currentCell.middle();
+
+        // check if the query fits on the left side
+        if (query.maxPoint.x <= center.x) {
+            if (query.maxPoint.y <= center.y)
+                return NW;
+
+            if (query.minPoint.y >= center.y)
+                return SW;
+        }
+
+        // check if the query fits on the right side
+        if (query.minPoint.x >= center.x) {
+            if (query.maxPoint.y <= center.y)
+                return NE;
+
+            if (query.minPoint.y >= center.y)
+                return SE;
+        }
+
+        // query straddles the grid
+        return INVALID_DIRECTION;
+
     };
-    // TODO
+    
 
     // modifies a given AABB to obtain the resulting AABB if we were entering the cell on its
     // "direction" quadrant
     // Precondition: direction is not INVALID
-    void aabbEnter(AABB<float>& bounds, OrdinalDirection direction) const {};
-    // TODO
+    void aabbEnter(AABB<float>& bounds, OrdinalDirection direction) const {
+        // find the center of the current bounds
+        sf::Vector2f center = bounds.middle();
+
+        // update the bounds to match the selected quadrant
+        if (direction == NW) {
+            bounds.maxPoint = center;
+        }
+
+        else if (direction == NE) {
+            bounds.minPoint.x = center.x;
+            bounds.maxPoint.y = center.y;
+        }
+
+        else if (direction == SW) {
+            bounds.maxPoint.x = center.x;
+            bounds.minPoint.y = center.y;
+        }
+        
+        else if (direction == SE) {
+            bounds.minPoint = center;
+        }
+
+    };
+    
 
     AABB<float> mBounds;
     size_t mMaxPrimitivesPerLeaf;
